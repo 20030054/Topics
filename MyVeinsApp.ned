@@ -35,10 +35,19 @@ simple MyVeinsApp extends DemoBaseApplLayer
     double CM_Task_Interval =default(5);
     
     @signal[numSent](type="float");
-	@statistic[latency](title="numSent"; source="numSent"; record=stats, vector; interpolationmode=none); 
+	@statistic[numSent](title="numSent"; source="numSent"; record=stats, vector; interpolationmode=none); 
 	
 	@signal[systemDelay](type="float");
-	@statistic[latency](title="systemDelay"; source="systemDelay"; record=stats, vector; interpolationmode=none); 
+	@statistic[systemDelay](title="systemDelay"; source="systemDelay"; record=stats, vector; interpolationmode=none); 
+	
+	@signal[queueDelay](type="float");
+	@statistic[queueDelay](title="queueDelay"; source="queueDelay"; record=stats, vector; interpolationmode=none); 
+	
+	@signal[serverDelay](type="float");
+	@statistic[serverDelay](title="serverDelay"; source="serverDelay"; record=stats,vector; interpolationmode=none); 
+	
+	@signal[queueSize](type="float");
+	@statistic[queueSize](title="queueSize"; source="queueSize"; record=stats,vector; interpolationmode=none); 
 
     
 }

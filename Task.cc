@@ -20,9 +20,11 @@ private:
     int taskOwner;
     double taskGenerationTime;
     double taskReceivingTime;
+    double taskStartProcessingTime;
     double taskCompleteTime;
     int taskSize;
     int taskPriority;
+    double comWeight;
     int taskStatus;
     double distance;
     double speed;
@@ -123,6 +125,22 @@ public:
 
     void setSpeed(double speed) {
         this->speed = speed;
+    }
+
+    double getComWeight() const {
+        return comWeight;
+    }
+
+    void setComWeight(double comWeight) {
+        this->comWeight = comWeight;
+    }
+
+    double getTaskStartProcessingTime() const {
+        return taskStartProcessingTime;
+    }
+
+    void setTaskStartProcessingTime(double taskStartProcessingTime) {
+        this->taskStartProcessingTime = taskStartProcessingTime;
     }
 };
 

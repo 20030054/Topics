@@ -59,7 +59,14 @@ protected:
     double CH_HB_Interval;
     double CM_HB_Interval;
     double timer;
+    double serverTimer;
     int countTasksSent;
+    int serverStatus;
+    enum sStatus {IDLE=0, BUSY=1};
+    int currentTaskIndex;
+    int countQueue=0;
+
+
     enum msgType {ADVERTIZEMENT=0, CON=1,CONACK=2, FIN=3, HB_CH=4, HB_CM=5, WORKLOAD=6,WRESULT=7,BROADCAST=-1};
     enum taskStatus {Sent=0, Received=1,Queued=2, Processing=3, Completed=4, Expired=5, Result=6};
     enum vType {CH=1,CM=2,FREE=3};
@@ -67,12 +74,18 @@ protected:
 
     static simsignal_t numSent;
     static simsignal_t systemDelay;
+    static simsignal_t queueDelay;
+    static simsignal_t serverDelay;
+    static simsignal_t queueSize;
 
 
 public:
     std::vector<int> clusterMembers;
     std::vector<Node*> clusterMembers2;
     std::vector<Task*> Tasks;
+
+    std::list<Task*> Tasks2;
+
     void initialize(int stage) override;
     void finish() override;
 
@@ -102,6 +115,7 @@ protected:
     void handleSelfMsg(cMessage* msg) override;
     void handlePositionUpdate(cObject* obj) override;
     double CalculateCommulativeWeight(double speed, double distance, int priority, int taskSize);
+    double CalculateCommulativeWeight2(double speed, double distance, int priority, int taskSize);
 
 };
 

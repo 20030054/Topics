@@ -25,6 +25,8 @@
 #include "veins/modules/application/traci/HeartBeatMessage_m.h"
 //#include "veins/modules/application/traci/HBMessage_m.h"
 
+#include "ctime"
+
 #include "veins/modules/application/traci/Node.cc"
 
 using namespace veins;
@@ -35,10 +37,20 @@ simsignal_t MyVeinsApp::numSent = registerSignal("numSent");
 
 simsignal_t MyVeinsApp::systemDelay= registerSignal("systemDelay");
 
+simsignal_t MyVeinsApp::queueDelay= registerSignal("queueDelay");
+
+simsignal_t MyVeinsApp::serverDelay= registerSignal("serverDelay");
+
+simsignal_t MyVeinsApp::queueSize= registerSignal("queueSize");
+
 void MyVeinsApp::initialize(int stage)
 {
     DemoBaseApplLayer::initialize(stage);
     if (stage == 0) {
+
+        serverDelay = registerSignal("serverDelay");
+        systemDelay = registerSignal("systemDelay");
+        queueDelay = registerSignal("queueDelay");
 
         // Initializing members and pointers of your application goes here
         EV << "Initializing " << par("appName").stringValue() << std::endl;
@@ -47,7 +59,14 @@ void MyVeinsApp::initialize(int stage)
         CM_HB_Interval=par("CM_HB_Interval");
         setClusterHeadId(0); //vehicle with no CH
 
+
+        srand((unsigned)time(0));
+
+        serverTimer=0;
+        serverStatus=IDLE;
+
         numSent=0;
+
 
         if(this->getParentModule()->getId()%5==0){
             findHost()->getDisplayString().setTagArg("i", 1, "yellow");
@@ -57,7 +76,16 @@ void MyVeinsApp::initialize(int stage)
             //            int range = 10000 - 5000 + 1;
             //            int num = rand() % range + min;
 
-            MIPS= (rand() % 5000) + 2000; // just random, further we can apply a prob. distribution here
+            //            MIPS= (rand() % 5000) + 5000; // just random, further we can apply a prob. distribution here
+            MIPS=1000;
+
+            std::ostringstream str;
+            str << "My MIPS are:"<< MIPS <<"\n" ;
+            this->getParentModule()->bubble(str.str().c_str());
+
+
+            EV<<"myMIPS"<< MIPS <<"\n";
+
 
             //            MIPS=5000;
         }
@@ -82,8 +110,31 @@ void MyVeinsApp::finish()
 {
     DemoBaseApplLayer::finish();
 
+
+//    for(unsigned int i=0; i<Tasks.size(); i++){
+//
+//
+//        if(Tasks[i]->getTaskStatus()==Completed){
+//
+//            recordScalar("systemDelay", (Tasks[i]->getTaskCompleteTime() - Tasks[i]->getTaskGenerationTime()));
+//            recordScalar("serverDelay", (Tasks[i]->getTaskCompleteTime() - Tasks[i]->getTaskStartProcessingTime()));
+//        }
+//        else if(Tasks[i]->getTaskStatus()==Processing){
+//            //emit(queueDelay,(Tasks[i]->getTaskStartProcessingTime() - Tasks[i]->getTaskReceivingTime()));
+//
+//            recordScalar("queueDelay", (Tasks[i]->getTaskStartProcessingTime() - Tasks[i]->getTaskReceivingTime()));
+//        }
+//
+//
+//    }
+
     recordScalar("numSent", numSent);
+    recordScalar("serverDelay",serverDelay);
+    recordScalar("queueDelay", queueDelay);
     recordScalar("systemDelay", systemDelay);
+    recordScalar("queueSize", Tasks.size());
+
+
 
     // statistics recording goes here
 }
@@ -94,8 +145,6 @@ void MyVeinsApp::onBSM(DemoSafetyMessage* bsm)
     // Your application has received a beacon message from another car or RSU
     // code for handling the message goes here
 }
-
-//service/data message
 
 void MyVeinsApp::onWSM(BaseFrame1609_4* frame)
 {
@@ -205,7 +254,11 @@ void MyVeinsApp::onWSM(BaseFrame1609_4* frame)
                     std::ostringstream msgID;
                     msgID << this->getParentModule()->getId() << "-" << clusterHeadID;
 
-                    workload->setTaskSize(1400);
+
+                    int sizeTask= 250;
+
+
+                    workload->setTaskSize(sizeTask);
                     this->getParentModule()->bubble(msgID.str().c_str());
                     workload->setReceipeintID(clusterHeadID);
 
@@ -245,6 +298,9 @@ void MyVeinsApp::onWSM(BaseFrame1609_4* frame)
 
             else if(wsm->getMessageType()==WORKLOAD){
                 if(CarType==CH){
+
+
+
                     std::ostringstream str;
                     str << "Received task from  " << wsm->getId()  ;
                     this->getParentModule()->bubble(str.str().c_str());
@@ -253,8 +309,10 @@ void MyVeinsApp::onWSM(BaseFrame1609_4* frame)
                     Task *tsk = new Task(wsm->getMessageID(),wsm->getTaskSize(), wsm->getTaskPriority(), simTime().dbl());
                     tsk->setTaskStatus(1); //received=1
                     tsk->setTaskOwner(wsm->getId());
+                    tsk->setTaskGenerationTime(wsm->getCreationTime().dbl());
+                    tsk->setTaskReceivingTime(simTime().dbl());
 
-                   //calculate distance
+                    //calculate distance
 
                     Coord myPosition=mobility->getPositionAt(simTime());
                     Coord senderPosition=wsm->getPosition();
@@ -264,17 +322,63 @@ void MyVeinsApp::onWSM(BaseFrame1609_4* frame)
                     tsk->setTaskPriority(wsm->getTaskPriority());
 
 
-                    double comWeight=CalculateCommulativeWeight(tsk->getSpeed(), tsk->getDistance(), tsk->getTaskPriority(), tsk->getTaskSize());
+                    double comWeight=CalculateCommulativeWeight2(tsk->getSpeed(), tsk->getDistance(), tsk->getTaskPriority(), tsk->getTaskSize());
+
+                    std::ostringstream str2;
+                    str2 << "com Weight:"<< comWeight <<"\n";
+                    this->getParentModule()->bubble(str2.str().c_str());
 
 
-                    if(Tasks.size()>0){
-                        tsk->setTaskCompleteTime((wsm->getTaskSize()/MIPS)+ Tasks[Tasks.size()-1]->getTaskCompleteTime());
+
+                    tsk->setComWeight(comWeight);
+
+
+                    tsk->setTaskStatus(Queued);
+                    Tasks.push_back(tsk);
+
+
+
+
+
+
+                    if(serverStatus==IDLE){
+                        if(Tasks.size()>1){
+                            int temp=0;
+                            double tempComWeight=Tasks[0]->getComWeight();
+                            for(unsigned int i=1; i<Tasks.size(); i++){
+                                if(Tasks[i]->getComWeight()>tempComWeight && Tasks[i]->getTaskStatus()==Queued){
+                                    tempComWeight=Tasks[i]->getComWeight();
+                                    temp=i;
+                                }
+                            }
+                            currentTaskIndex=temp;
+                            serverTimer=(Tasks[temp]->getTaskSize()/MIPS)  + simTime().dbl();
+                            Tasks[temp]->setTaskStatus(Processing);
+                            Tasks[temp]->setTaskStartProcessingTime(simTime().dbl());
+                            serverStatus=BUSY;
+                        }
+                        else{
+                            if(Tasks[0]->getTaskStatus()==Queued){
+                                serverTimer=(Tasks[0]->getTaskSize()/MIPS) + simTime().dbl();
+                                currentTaskIndex=0;
+                                Tasks[0]->setTaskStatus(Processing);
+                                Tasks[0]->setTaskStartProcessingTime(simTime().dbl());
+                                serverStatus=BUSY;
+                            }
+
+                        }
                     }
-                    else{
-                        tsk->setTaskCompleteTime((wsm->getTaskSize()/MIPS)+simTime().dbl());
-                    }
 
-                    Tasks.push_back(tsk); //array of objects
+
+
+                    //                    if(Tasks.size()>0){
+                    //                        tsk->setTaskCompleteTime((wsm->getTaskSize()/MIPS)+ Tasks[Tasks.size()-1]->getTaskCompleteTime());
+                    //                    }
+                    //                    else{
+                    //                        tsk->setTaskCompleteTime((wsm->getTaskSize()/MIPS)+simTime().dbl());
+                    //                    }
+                    //
+                    //                    Tasks.push_back(tsk); //array of objects
                 }
 
             }
@@ -367,15 +471,20 @@ double CalculateWeight(int min, int max, double input, bool effect){
 
 
 }
-
-
 double MyVeinsApp::CalculateCommulativeWeight(double speed, double distance, int priority, int taskSize){
 
     double comWeight= CalculateWeight(1, 60, speed, false) + CalculateWeight(10, 500, distance, false) + CalculateWeight(1, 5, priority, true) + CalculateWeight(10, 500, taskSize, false);
-        return comWeight;
+    return comWeight;
+}
+double CalculateWeight2(double input, double weight){
+    return input * weight;
 }
 
+double MyVeinsApp::CalculateCommulativeWeight2(double speed, double distance, int priority, int taskSize){
 
+    double comWeight= CalculateWeight2(speed, 0.1) + CalculateWeight2(distance, 0.1) + CalculateWeight2( priority, 0.3) + CalculateWeight2(taskSize, 0.5);
+    return comWeight;
+}
 
 void MyVeinsApp::onWSA(DemoServiceAdvertisment* wsa)
 {
@@ -424,32 +533,115 @@ void MyVeinsApp::handlePositionUpdate(cObject* obj)
         }
 
 
-        if(Tasks.size() >0 ){
-            if(Tasks[0]->getTaskCompleteTime() <= simTime().dbl()){
-                //sending result back to client
+        if(serverStatus==BUSY){
+            if(simTime().dbl() >= serverTimer){
+                emit(queueSize, Tasks.size());
+                emit(serverDelay, (simTime().dbl() - Tasks[currentTaskIndex]->getTaskStartProcessingTime()));
+                emit(systemDelay, (simTime().dbl() - Tasks[currentTaskIndex]->getTaskReceivingTime()));
+                emit(queueDelay, (Tasks[currentTaskIndex]->getTaskStartProcessingTime()- Tasks[currentTaskIndex]->getTaskReceivingTime()));
+
+
+                Tasks[currentTaskIndex]->setTaskCompleteTime(simTime().dbl());
+                Tasks[currentTaskIndex]->setTaskStatus(Completed);
+
+                double systemDelay=simTime().dbl() - Tasks[currentTaskIndex]->getTaskReceivingTime();
+                std::ostringstream str;
+                str << "Task arrive " <<std::to_string(Tasks[currentTaskIndex]->getTaskReceivingTime()) <<"Queueing delay   "<<std::to_string(Tasks[currentTaskIndex]->getTaskStartProcessingTime() - Tasks[currentTaskIndex]->getTaskReceivingTime()) <<" completed" <<std::to_string(systemDelay);
+                this->getParentModule()->bubble(str.str().c_str());
+                serverStatus=IDLE;
+
 
                 TraCIDemo11pMessage* wsmResult = new TraCIDemo11pMessage();
                 populateWSM(wsm);
                 wsmResult->setMessageType(WRESULT);
-                wsmResult->setReceipeintID(Tasks[0]->getTaskOwner());
-                wsm->setMessageID(Tasks[0]->getTaskId());
+                wsmResult->setReceipeintID(Tasks[currentTaskIndex]->getTaskOwner());
+                wsm->setMessageID(Tasks[currentTaskIndex]->getTaskId());
                 wsmResult->setId(this->getParentModule()->getId());
                 sendDown(wsmResult);
 
 
-                std::ostringstream str;
-                str << "Task " <<  Tasks[0]->getTaskId() << " completed";
-                this->getParentModule()->bubble(str.str().c_str());
 
 
-                recordScalar("systemDelay", (simTime().dbl()- Tasks[0]->getTaskGenerationTime()));
 
-                Tasks.erase(Tasks.begin()+0);
 
+                // to debug the delays, look into serverTimer and currentIndex
+
+
+                //                std::ostringstream str;
+                //                str << "Task " <<  Tasks[currentTaskIndex]->getTaskId() << " completed in ";
+                //                this->getParentModule()->bubble(str.str().c_str());
+
+
+
+
+
+                //                recordScalar("systemDelay", (simTime().dbl()- Tasks[currentTaskIndex]->getTaskGenerationTime()));
+                //            Tasks.erase(Tasks.begin()+currentTaskIndex);
+
+
+
+
+                if(Tasks.size()==0){
+                    serverStatus=IDLE;
+                }
+                else{
+                    int temp=-1;
+                    double tempComWeight=-1;
+                    for(unsigned int h=0; h< Tasks.size(); h++){
+                        if(Tasks[h]->getTaskStatus()==Queued){
+                            tempComWeight=Tasks[h]->getComWeight();
+                            temp=h;
+                            break;
+                        }
+                    }
+
+                    if(temp != -1 && tempComWeight != -1){
+                        for(unsigned int i=1; i<Tasks.size(); i++){
+                            if(Tasks[i]->getComWeight()>tempComWeight && Tasks[i]->getTaskStatus()==Queued){
+                                tempComWeight=Tasks[i]->getComWeight();
+                                temp=i;
+                            }
+                        }
+                        currentTaskIndex=temp;
+                        serverTimer=(Tasks[temp]->getTaskSize()/MIPS)  + simTime().dbl();
+                        Tasks[temp]->setTaskStartProcessingTime(simTime().dbl());
+                        Tasks[temp]->setTaskStatus(Processing);
+                        serverStatus=BUSY;
+                    }
+
+
+
+                    //                    double queueDelay=simTime().dbl() - Tasks[currentTaskIndex]->getTaskReceivingTime();
+                    //
+                    //
+
+                    //                    std::ostringstream str;
+                    //                    str << "Queue Time:"<< queueDelay <<"\n" ;
+                    //                    this->getParentModule()->bubble(str.str().c_str());
+
+
+                }
             }
-
-
         }
+
+        //
+        //        if(Tasks.size() >0 ){
+        //            if(Tasks[0]->getTaskCompleteTime() <= simTime().dbl()){
+        //                //sending result back to client
+        //                TraCIDemo11pMessage* wsmResult = new TraCIDemo11pMessage();
+        //                populateWSM(wsm);
+        //                wsmResult->setMessageType(WRESULT);
+        //                wsmResult->setReceipeintID(Tasks[0]->getTaskOwner());
+        //                wsm->setMessageID(Tasks[0]->getTaskId());
+        //                wsmResult->setId(this->getParentModule()->getId());
+        //                sendDown(wsmResult);
+        //                std::ostringstream str;
+        //                str << "Task " <<  Tasks[0]->getTaskId() << " completed";
+        //                this->getParentModule()->bubble(str.str().c_str());
+        //                recordScalar("systemDelay", (simTime().dbl()- Tasks[0]->getTaskGenerationTime()));
+        //                Tasks.erase(Tasks.begin()+0);
+        //            }
+        //        }
 
 
 
@@ -486,7 +678,13 @@ void MyVeinsApp::handlePositionUpdate(cObject* obj)
 
 
             wsmTask->setMessageType(WORKLOAD);
-            wsmTask->setTaskSize(100); //temp fix
+
+            int sizeTask= 250;
+
+
+
+
+            wsmTask->setTaskSize(sizeTask); //temp fix
             wsmTask->setReceipeintID(this->CH);
             wsmTask->setId(this->getParentModule()->getId()); //set sender id
             wsmTask->setPosition(mobility->getPositionAt(simTime()));
